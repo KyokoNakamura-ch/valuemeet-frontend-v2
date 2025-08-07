@@ -1,4 +1,4 @@
-# Single job workflow - artifact問題を回避
+# Azure CLI を使った安定したデプロイメント
 name: Build and deploy Node.js app to Azure Web App - aps-n2-01
 
 on:
@@ -32,16 +32,28 @@ jobs:
           npm run build
           echo "✅ Build completed successfully"
       
-      - name: Verify build output
+      - name: Create deployment zip
         run: |
-          echo "Verifying build output..."
-          ls -la .next/ || echo "❌ .next directory not found"
-          ls -la package.json || echo "❌ package.json not found"
+          echo "Creating deployment package..."
+          zip -r deploy.zip .next node_modules package*.json public next.config.js -x "node_modules/.cache/*"
+          echo "✅ Deployment package created"
+      
+      - name: Login to Azure
+        uses: azure/login@v1
+        with:
+          publish-profile: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE_4C24000BEE324F559E6C153082980F1A }}
+      
+      - name: Stop App Service (prevent conflicts)
+        run: |
+          az webapp stop --name aps-n2-01 --resource-group $(az webapp show --name aps-n2-01 --query resourceGroup -o tsv)
+          echo "✅ App Service stopped"
       
       - name: Deploy to Azure Web App
-        uses: azure/webapps-deploy@v3
-        with:
-          app-name: 'aps-n2-01'
-          slot-name: 'Production'
-          package: .
-          publish-profile: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE_4C24000BEE324F559E6C153082980F1A }}
+        run: |
+          az webapp deploy --name aps-n2-01 --resource-group $(az webapp show --name aps-n2-01 --query resourceGroup -o tsv) --src-path deploy.zip --type zip
+          echo "✅ Deployment completed"
+      
+      - name: Start App Service
+        run: |
+          az webapp start --name aps-n2-01 --resource-group $(az webapp show --name aps-n2-01 --query resourceGroup -o tsv)
+          echo "✅ App Service started"
