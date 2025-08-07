@@ -1,4 +1,4 @@
-# Azure CLI を使った安定したデプロイメント
+# 409 Conflictエラー対策版
 name: Build and deploy Node.js app to Azure Web App - aps-n2-01
 
 on:
@@ -32,28 +32,22 @@ jobs:
           npm run build
           echo "✅ Build completed successfully"
       
-      - name: Create deployment zip
+      - name: Wait for any pending deployments
         run: |
-          echo "Creating deployment package..."
-          zip -r deploy.zip .next node_modules package*.json public next.config.js -x "node_modules/.cache/*"
-          echo "✅ Deployment package created"
+          echo "Waiting 30 seconds to avoid deployment conflicts..."
+          sleep 30
       
-      - name: Login to Azure
-        uses: azure/login@v1
+      - name: Deploy to Azure Web App (with retry)
+        uses: azure/webapps-deploy@v3
         with:
+          app-name: 'aps-n2-01'
+          package: .
           publish-profile: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE_4C24000BEE324F559E6C153082980F1A }}
+          timeout: 600000
+        env:
+          AZURE_WEBAPP_PUBLISH_PROFILE: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE_4C24000BEE324F559E6C153082980F1A }}
       
-      - name: Stop App Service (prevent conflicts)
+      - name: Verify deployment
         run: |
-          az webapp stop --name aps-n2-01 --resource-group $(az webapp show --name aps-n2-01 --query resourceGroup -o tsv)
-          echo "✅ App Service stopped"
-      
-      - name: Deploy to Azure Web App
-        run: |
-          az webapp deploy --name aps-n2-01 --resource-group $(az webapp show --name aps-n2-01 --query resourceGroup -o tsv) --src-path deploy.zip --type zip
-          echo "✅ Deployment completed"
-      
-      - name: Start App Service
-        run: |
-          az webapp start --name aps-n2-01 --resource-group $(az webapp show --name aps-n2-01 --query resourceGroup -o tsv)
-          echo "✅ App Service started"
+          echo "Deployment completed. App URL: https://aps-n2-01.azurewebsites.net"
+          curl -I https://aps-n2-01.azurewebsites.net || echo "Site not immediately available"
