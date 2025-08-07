@@ -1,4 +1,4 @@
-# 409 Conflictエラー対策版
+# リトライ機能付き簡単ワークフロー
 name: Build and deploy Node.js app to Azure Web App - aps-n2-01
 
 on:
@@ -20,34 +20,34 @@ jobs:
           node-version: '20.x'
           cache: 'npm'
       
-      - name: Install dependencies
+      - name: Install and build
         run: |
-          echo "Installing dependencies..."
           npm ci
-          echo "✅ Dependencies installed successfully"
-      
-      - name: Build Next.js app
-        run: |
-          echo "Building Next.js application..."
           npm run build
-          echo "✅ Build completed successfully"
       
-      - name: Wait for any pending deployments
-        run: |
-          echo "Waiting 30 seconds to avoid deployment conflicts..."
-          sleep 30
-      
-      - name: Deploy to Azure Web App (with retry)
+      - name: Deploy to Azure Web App (Attempt 1)
+        id: deploy1
+        continue-on-error: true
         uses: azure/webapps-deploy@v3
         with:
           app-name: 'aps-n2-01'
           package: .
           publish-profile: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE_4C24000BEE324F559E6C153082980F1A }}
-          timeout: 600000
-        env:
-          AZURE_WEBAPP_PUBLISH_PROFILE: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE_4C24000BEE324F559E6C153082980F1A }}
+          clean: true
+          restart: true
       
-      - name: Verify deployment
+      - name: Wait and retry if first attempt failed
+        if: steps.deploy1.outcome == 'failure'
         run: |
-          echo "Deployment completed. App URL: https://aps-n2-01.azurewebsites.net"
-          curl -I https://aps-n2-01.azurewebsites.net || echo "Site not immediately available"
+          echo "First deployment failed, waiting 60 seconds before retry..."
+          sleep 60
+      
+      - name: Deploy to Azure Web App (Attempt 2)
+        if: steps.deploy1.outcome == 'failure'
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: 'aps-n2-01'
+          package: .
+          publish-profile: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE_4C24000BEE324F559E6C153082980F1A }}
+          clean: true
+          restart: true
