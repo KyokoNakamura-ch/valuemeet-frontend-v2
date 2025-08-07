@@ -1,83 +1,46 @@
 'use client';
-
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useRouter } from 'next/navigation';
-import { Search, Filter, Plus, Calendar, Users, Clock, Check } from 'lucide-react';
+import { Search, Filter, Plus, Calendar, Users, Clock, MapPin, User } from 'lucide-react';
 
-const initialMeetings = [
-  {
-    id: 1,
-    title: '週次チーム会議',
-    date: '2025-01-15',
-    time: '10:00-11:00',
-    participants: 5,
-    status: 'scheduled',
-    location: '会議室A',
-    agenda: ['前週の振り返り', '今週の目標設定', 'プロジェクト進捗確認'],
-    facilitator: '田中太郎'
-  },
-  {
-    id: 2,
-    title: 'プロジェクト進捗確認',
-    date: '2025-01-15', 
-    time: '14:00-15:30',
-    participants: 8,
-    status: 'scheduled',
-    location: 'オンライン',
-    agenda: ['プロジェクト全体の進捗報告', '各チームの状況共有'],
-    facilitator: '佐藤花子'
-  },
-  {
-    id: 3,
-    title: '月次レビュー',
-    date: '2025-01-16',
-    time: '16:00-17:00',
-    participants: 12,
-    status: 'scheduled',
-    location: '大会議室',
-    agenda: ['月次売上報告', '課題の振り返り'],
-    facilitator: '鈴木一郎'
-  },
-  {
-    id: 4,
-    title: '企画ブレインストーミング',
-    date: '2025-01-17',
-    time: '13:00-14:30',
-    participants: 6,
-    status: 'draft',
-    location: '会議室B',
-    agenda: ['新商品企画', 'アイデア出し'],
-    facilitator: '高橋美咲'
-  },
-  {
-    id: 5,
-    title: 'クライアント打ち合わせ',
-    date: '2025-01-18',
-    time: '15:00-16:00',
-    participants: 4,
-    status: 'scheduled',
-    location: 'オンライン',
-    agenda: ['要件確認', 'スケジュール調整'],
-    facilitator: '山田次郎'
-  },
-  {
-    id: 6,
-    title: '四半期戦略会議',
-    date: '2025-01-20',
-    time: '09:00-12:00',
-    participants: 15,
-    status: 'draft',
-    location: '大会議室',
-    agenda: ['四半期レビュー', '次期戦略立案'],
-    facilitator: '佐藤花子'
-  }
-];
+// 型定義を追加
+interface Meeting {
+  id: number;
+  title: string;
+  date: string;
+  time: string;
+  participants: number;
+  status: 'scheduled' | 'draft' | 'completed';
+  location: string;
+  agenda: string[];
+  facilitator: string;
+}
 
-const getStatusColor = (status: string) => {
+interface UserProfile {
+  user_id: string;
+  organization_id: number;
+}
+
+interface ApiMeetingItem {
+  meeting_id: number;
+  title: string;
+  date_time: string;
+  participants?: number;
+  status?: string;
+  meeting_mode: string;
+  agenda?: string[];
+  name?: string;
+}
+
+// APIエンドポイントを定義
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || '';
+
+// ユーティリティ関数
+const getStatusColor = (status: string): string => {
   switch (status) {
     case 'scheduled': return 'bg-green-100 text-green-700';
     case 'draft': return 'bg-yellow-100 text-yellow-700';
@@ -86,7 +49,7 @@ const getStatusColor = (status: string) => {
   }
 };
 
-const getStatusText = (status: string) => {
+const getStatusText = (status: string): string => {
   switch (status) {
     case 'scheduled': return '予定';
     case 'draft': return '下書き';
@@ -95,92 +58,193 @@ const getStatusText = (status: string) => {
   }
 };
 
-export default function MeetingManagement() {
-  const [meetings, setMeetings] = useState(initialMeetings);
-  const [filteredMeetings, setFilteredMeetings] = useState(initialMeetings);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [sortBy, setSortBy] = useState('date');
-  const router = useRouter();
-
-  // 初期化時にソートを適用
-  useEffect(() => {
-    applyFiltersAndSort(meetings, searchQuery, sortBy);
+// カスタムフック：API呼び出し
+const useApi = () => {
+  const fetchUserProfile = useCallback(async (userId: string): Promise<UserProfile> => {
+    const response = await fetch(`${API_BASE_URL}/usr_profile?user_id=${userId}`);
+    if (!response.ok) {
+      throw new Error(`ユーザープロファイル取得失敗: ${response.status}`);
+    }
+    return response.json();
   }, []);
 
-  const handleEditMeeting = (meeting: any) => {
-    router.push(`/edit-meeting?id=${meeting.id}`);
-  };
+  const fetchMeetings = useCallback(async (userId: string): Promise<ApiMeetingItem[]> => {
+    const params = new URLSearchParams({ user_id: userId });
+    const response = await fetch(`${API_BASE_URL}/meeting_list?${params}`);
+    if (!response.ok) {
+      throw new Error(`会議一覧取得失敗: ${response.status}`);
+    }
+    return response.json();
+  }, []);
 
-  const handleSearch = (query: string) => {
-    setSearchQuery(query);
-    applyFiltersAndSort(meetings, query, sortBy);
-  };
+  return { fetchUserProfile, fetchMeetings };
+};
 
-  const handleSort = (sortOption: string) => {
-    setSortBy(sortOption);
-    applyFiltersAndSort(meetings, searchQuery, sortOption);
-  };
+export default function MeetingManagement() {
+  const [meetings, setMeetings] = useState<Meeting[]>([]);
+  const [filteredMeetings, setFilteredMeetings] = useState<Meeting[]>([]);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [sortBy, setSortBy] = useState('date');
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [userId, setUserId] = useState<string | null>(null);
+  const [orgId, setOrgId] = useState<number | null>(null);
+  
+  const router = useRouter();
+  const { fetchUserProfile, fetchMeetings } = useApi();
 
-  const applyFiltersAndSort = (meetingList: any[], query: string, sortOption: string) => {
-    let filtered = meetingList;
+  // APIデータのマッピング関数
+  const mapApiDataToMeeting = (item: ApiMeetingItem): Meeting => ({
+    id: item.meeting_id,
+    title: item.title,
+    date: item.date_time?.split('T')[0] || '',
+    time: item.date_time?.split('T')[1]?.substring(0, 5) || '',
+    participants: item.participants || 1,
+    status: (item.status || 'scheduled') as Meeting['status'],
+    location: item.meeting_mode,
+    agenda: item.agenda || [],
+    facilitator: item.name || ''
+  });
 
-    // Search filter
-    if (query) {
-      filtered = filtered.filter(meeting => 
-        meeting.title.toLowerCase().includes(query.toLowerCase()) ||
-        meeting.location.toLowerCase().includes(query.toLowerCase()) ||
-        (meeting.facilitator && meeting.facilitator.toLowerCase().includes(query.toLowerCase()))
+  // データ取得の初期化
+  useEffect(() => {
+    const initializeData = async () => {
+      try {
+        setLoading(true);
+        setError(null);
+
+        // 固定のユーザーID（実際のアプリでは認証から取得）
+        const currentUserId = "A000001";
+        
+        // 1. ユーザープロファイル取得
+        const profile = await fetchUserProfile(currentUserId);
+        console.log('Profile:', profile);
+        
+        setUserId(profile.user_id);
+        setOrgId(profile.organization_id);
+
+        // 2. 会議一覧取得
+        const meetingData = await fetchMeetings(profile.user_id);
+        console.log('Meeting data:', meetingData);
+
+        // 3. データマッピング
+        const mappedMeetings = meetingData.map(mapApiDataToMeeting);
+        
+        setMeetings(mappedMeetings);
+        setFilteredMeetings(mappedMeetings);
+        
+      } catch (err) {
+        const errorMessage = err instanceof Error ? err.message : '予期しないエラーが発生しました';
+        console.error('Data initialization error:', err);
+        setError(errorMessage);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    initializeData();
+  }, [fetchUserProfile, fetchMeetings]);
+
+  // フィルタリング・ソート機能
+  const applyFiltersAndSort = useCallback((
+    meetingList: Meeting[], 
+    query: string, 
+    sortOption: string
+  ) => {
+    let filtered = [...meetingList];
+
+    // 検索フィルタ
+    if (query.trim()) {
+      const lowerQuery = query.toLowerCase();
+      filtered = filtered.filter(meeting =>
+        meeting.title?.toLowerCase().includes(lowerQuery) ||
+        meeting.location?.toLowerCase().includes(lowerQuery) ||
+        meeting.facilitator?.toLowerCase().includes(lowerQuery)
       );
     }
 
-    // Sort
-    filtered = [...filtered].sort((a, b) => {
+    // ソート
+    filtered.sort((a, b) => {
       switch (sortOption) {
         case 'date':
-          return new Date(a.date).getTime() - new Date(b.date).getTime();
+          return new Date(`${a.date} ${a.time}`).getTime() - new Date(`${b.date} ${b.time}`).getTime();
         case 'status':
           return a.status.localeCompare(b.status);
         case 'facilitator':
-          return (a.facilitator || '').localeCompare(b.facilitator || '');
+          return a.facilitator.localeCompare(b.facilitator);
+        case 'title':
+          return a.title.localeCompare(b.title);
         default:
           return 0;
       }
     });
 
     setFilteredMeetings(filtered);
-  };
+  }, []);
 
-  const handleViewDetails = (meetingId: number) => {
+  // 検索・ソートハンドラ
+  const handleSearch = useCallback((query: string) => {
+    setSearchQuery(query);
+    applyFiltersAndSort(meetings, query, sortBy);
+  }, [meetings, sortBy, applyFiltersAndSort]);
+
+  const handleSort = useCallback((sortOption: string) => {
+    setSortBy(sortOption);
+    applyFiltersAndSort(meetings, searchQuery, sortOption);
+  }, [meetings, searchQuery, applyFiltersAndSort]);
+
+  // ナビゲーションハンドラ
+  const handleEditMeeting = useCallback((meeting: Meeting) => {
+    router.push(`/edit-meeting?id=${meeting.id}`);
+  }, [router]);
+
+  const handleViewDetails = useCallback((meetingId: number) => {
     router.push(`/meeting/${meetingId}`);
-  };
+  }, [router]);
 
-  const handleCreateMeeting = () => {
+  const handleCreateMeeting = useCallback(() => {
     router.push('/create-meeting');
-  };
+  }, [router]);
 
-  const handleCreateMeetingData = (meetingData: any) => {
-    const newMeeting = {
-      id: meetings.length + 1,
-      title: meetingData.title,
-      date: meetingData.date,
-      time: `${meetingData.startTime}-${meetingData.endTime}`,
-      participants: meetingData.participantCount || 1,
-      status: meetingData.status || 'draft',
-      location: meetingData.location,
-      agenda: meetingData.agenda || [],
-      facilitator: meetingData.facilitator || ''
-    };
-    const updatedMeetings = [newMeeting, ...meetings];
-    setMeetings(updatedMeetings);
-    applyFiltersAndSort(updatedMeetings, searchQuery, sortBy);
-  };
+  // ローディング状態
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-orange-600 mx-auto"></div>
+          <p className="mt-4 text-gray-600">会議データを読み込んでいます...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // エラー状態
+  if (error) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="text-center">
+          <div className="text-red-600 mb-4">
+            <Calendar className="h-12 w-12 mx-auto mb-2" />
+            <p className="text-lg font-medium">エラーが発生しました</p>
+          </div>
+          <p className="text-gray-600 mb-4">{error}</p>
+          <Button onClick={() => window.location.reload()}>
+            再読み込み
+          </Button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-gray-900">会議管理</h1>
-        <Button 
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">会議管理</h1>
+          {userId && <p className="text-sm text-gray-600 mt-1">ユーザー: {userId}</p>}
+        </div>
+        <Button
           className="bg-orange-600 hover:bg-orange-700"
           onClick={handleCreateMeeting}
         >
@@ -206,41 +270,40 @@ export default function MeetingManagement() {
             <SelectValue placeholder="並び順を選択" />
           </SelectTrigger>
           <SelectContent className="bg-white border border-gray-200 shadow-lg">
-            <SelectItem 
-              value="date" 
-              className={`hover:bg-gray-50 ${sortBy === 'date' ? 'bg-orange-50' : ''}`}
-            >
-              <div className="flex items-center justify-between w-full">
-                <span className="text-gray-900">日付順</span>
-                {sortBy === 'date' && (
-                  <Check className="h-4 w-4 text-orange-600 ml-2" />
-                )}
-              </div>
-            </SelectItem>
-            <SelectItem 
-              value="status" 
-              className={`hover:bg-gray-50 ${sortBy === 'status' ? 'bg-orange-50' : ''}`}
-            >
-              <div className="flex items-center justify-between w-full">
-                <span className="text-gray-900">ステータス順</span>
-                {sortBy === 'status' && (
-                  <Check className="h-4 w-4 text-orange-600 ml-2" />
-                )}
-              </div>
-            </SelectItem>
-            <SelectItem 
-              value="facilitator" 
-              className={`hover:bg-gray-50 ${sortBy === 'facilitator' ? 'bg-orange-50' : ''}`}
-            >
-              <div className="flex items-center justify-between w-full">
-                <span className="text-gray-900">ファシリテーター順</span>
-                {sortBy === 'facilitator' && (
-                  <Check className="h-4 w-4 text-orange-600 ml-2" />
-                )}
-              </div>
-            </SelectItem>
+            <SelectItem value="date">日時順</SelectItem>
+            <SelectItem value="title">タイトル順</SelectItem>
+            <SelectItem value="status">ステータス順</SelectItem>
+            <SelectItem value="facilitator">ファシリテーター順</SelectItem>
           </SelectContent>
         </Select>
+      </div>
+
+      {/* Statistics */}
+      <div className="bg-gray-50 rounded-lg p-4">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
+          <div>
+            <p className="text-2xl font-bold text-gray-900">{meetings.length}</p>
+            <p className="text-sm text-gray-600">総会議数</p>
+          </div>
+          <div>
+            <p className="text-2xl font-bold text-green-600">
+              {meetings.filter(m => m.status === 'scheduled').length}
+            </p>
+            <p className="text-sm text-gray-600">予定</p>
+          </div>
+          <div>
+            <p className="text-2xl font-bold text-yellow-600">
+              {meetings.filter(m => m.status === 'draft').length}
+            </p>
+            <p className="text-sm text-gray-600">下書き</p>
+          </div>
+          <div>
+            <p className="text-2xl font-bold text-gray-600">
+              {meetings.filter(m => m.status === 'completed').length}
+            </p>
+            <p className="text-sm text-gray-600">完了</p>
+          </div>
+        </div>
       </div>
 
       {/* Meetings Grid */}
@@ -260,54 +323,50 @@ export default function MeetingManagement() {
             <Card key={meeting.id} className="bg-white hover:shadow-md transition-shadow cursor-pointer">
               <CardHeader className="pb-3">
                 <div className="flex items-center justify-between">
-                  <CardTitle className="text-lg font-semibold text-gray-900">
+                  <CardTitle className="text-lg font-semibold text-gray-900 truncate mr-2">
                     {meeting.title}
                   </CardTitle>
-                  <span className={`text-xs px-2 py-1 rounded-full ${getStatusColor(meeting.status)}`}>
+                  <span className={`text-xs px-2 py-1 rounded-full flex-shrink-0 ${getStatusColor(meeting.status)}`}>
                     {getStatusText(meeting.status)}
                   </span>
                 </div>
               </CardHeader>
               <CardContent className="space-y-3">
                 <div className="flex items-center text-sm text-gray-600">
-                  <Calendar className="h-4 w-4 mr-2" />
-                  {meeting.date}
+                  <Calendar className="h-4 w-4 mr-2 flex-shrink-0" />
+                  <span>{meeting.date}</span>
                 </div>
                 <div className="flex items-center text-sm text-gray-600">
-                  <Clock className="h-4 w-4 mr-2" />
-                  {meeting.time}
+                  <Clock className="h-4 w-4 mr-2 flex-shrink-0" />
+                  <span>{meeting.time}</span>
                 </div>
                 <div className="flex items-center text-sm text-gray-600">
-                  <Users className="h-4 w-4 mr-2" />
-                  {meeting.participants}名参加予定
+                  <Users className="h-4 w-4 mr-2 flex-shrink-0" />
+                  <span>{meeting.participants}名参加予定</span>
                 </div>
                 <div className="flex items-center text-sm text-gray-600">
-                  <div className="w-4 h-4 mr-2 flex items-center justify-center">
-                    📍
-                  </div>
-                  {meeting.location}
+                  <MapPin className="h-4 w-4 mr-2 flex-shrink-0" />
+                  <span className="truncate">{meeting.location}</span>
                 </div>
                 {meeting.facilitator && (
                   <div className="flex items-center text-sm text-gray-600">
-                    <div className="w-4 h-4 mr-2 flex items-center justify-center">
-                      👤
-                    </div>
-                    ファシリテーター: {meeting.facilitator}
+                    <User className="h-4 w-4 mr-2 flex-shrink-0" />
+                    <span className="truncate">ファシリテーター: {meeting.facilitator}</span>
                   </div>
                 )}
                 <div className="pt-3 border-t border-gray-200">
                   <div className="flex space-x-2">
-                    <Button 
-                      size="sm" 
-                      variant="outline" 
+                    <Button
+                      size="sm"
+                      variant="outline"
                       className="flex-1"
                       onClick={() => handleEditMeeting(meeting)}
                     >
                       編集
                     </Button>
-                    <Button 
-                      size="sm" 
-                      variant="outline" 
+                    <Button
+                      size="sm"
+                      variant="outline"
                       className="flex-1"
                       onClick={() => handleViewDetails(meeting.id)}
                     >
